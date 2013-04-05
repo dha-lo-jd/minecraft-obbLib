@@ -1,8 +1,10 @@
 package net.minecraft.src.obb;
 
 import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.Map;
+
+import net.minecraft.src.obb.EnumSupport.EnumChainMap;
+import net.minecraft.src.obb.EnumSupport.EnumWorker;
+import net.minecraft.src.obb.EnumSupport.ValueAccessorMap;
 
 public class AroundWorker {
 
@@ -20,55 +22,44 @@ public class AroundWorker {
 		T reverse();
 	}
 
-	public interface DirectionalWorker<T extends Enum<T> & Directionable<T>, V> {
-		void work(T dir, Offset offset, V dto);
+	public interface DirectionalWorker<T extends Enum<T> & Directionable<T>, V> extends EnumWorker<T, V> {
 	}
 
 	public abstract static class Each2SWorker<V, T extends Enum<T> & AroundsDirectionable<T>> implements DirectionalWorker<T, V> {
 		private class InternalWorker implements TwoSideWorker<Direction, V> {
 			@Override
-			public void workNext(Direction dir, Offset offset, V dto) {
-				doInternalWorkNext(dir, offset, dto);
+			public void workNext(Direction dir, V dto) {
+				doInternalWorkNext(dir, dto);
 			}
 
 			@Override
-			public void workPrev(Direction dir, Offset offset, V dto) {
-				doInternalWorkPrev(dir, offset, dto);
+			public void workPrev(Direction dir, V dto) {
+				doInternalWorkPrev(dir, dto);
 			}
 		}
 
 		private final InternalWorker internalWorker = new InternalWorker();
 
 		@Override
-		public void work(T dir, Offset offset, V dto) {
-			preWork(dir, offset, dto);
+		public void work(T dir, V dto) {
+			preWork(dir, dto);
 
 			Direction d = dir.getDirection();
 			workTwoSidesDirection(d, internalWorker, dto);
 
-			afterWork(dir, offset, dto);
+			afterWork(dir, dto);
 		}
 
-		protected void afterWork(T dir, Offset offset, V dto) {
+		protected void afterWork(T dir, V dto) {
 		}
 
-		protected abstract void doInternalWorkNext(Direction dir, Offset offset, V dto);
+		protected abstract void doInternalWorkNext(Direction dir, V dto);
 
-		protected abstract void doInternalWorkPrev(Direction dir, Offset offset, V dto);
+		protected abstract void doInternalWorkPrev(Direction dir, V dto);
 
-		protected void preWork(T dir, Offset offset, V dto) {
+		protected void preWork(T dir, V dto) {
 		}
 
-	}
-
-	public abstract static class EnumMappingWorker<T extends Enum<T> & Directionable<T>, V> implements DirectionalWorker<T, EnumMap<T, V>> {
-
-		@Override
-		public void work(T dir, Offset offset, EnumMap<T, V> dto) {
-			dto.put(dir, valueOf(dir));
-		}
-
-		protected abstract V valueOf(T dir);
 	}
 
 	public enum Offset {
@@ -103,28 +94,35 @@ public class AroundWorker {
 	}
 
 	public interface TwoSideWorker<T extends Enum<T> & Directionable<T>, V> {
-		void workNext(T dir, Offset offset, V dto);
+		void workNext(T dir, V dto);
 
-		void workPrev(T dir, Offset offset, V dto);
+		void workPrev(T dir, V dto);
 	}
 
 	enum Around implements AroundsDirectionable<Around> {
-		FORWARD(Offset.FORWARD, AxisType.Y, OffsetType.PREV), //
-		RIGHT(Offset.RIGHT, AxisType.X, OffsetType.NEXT), //
-		BACK(Offset.BACK, AxisType.Y, OffsetType.NEXT), //
-		LEFT(Offset.LEFT, AxisType.X, OffsetType.PREV), //
+		FORWARD(Offset.FORWARD, AxisType.Y, OffsetType.NEGATIVE), //
+		RIGHT(Offset.RIGHT, AxisType.X, OffsetType.POSITIVE), //
+		BACK(Offset.BACK, AxisType.Y, OffsetType.POSITIVE), //
+		LEFT(Offset.LEFT, AxisType.X, OffsetType.NEGATIVE), //
 		;
-		public static class AxisMap<V> {
-			private final EnumMap<AxisType, V> map;
+		public static class AxisMap<V> extends ValueAccessorMap<AxisType, V> {
+			private ValueAccessor xValueAccessor;
+			private ValueAccessor yValueAccessor;
 
 			public AxisMap(V xValue, V yValue) {
-				map = new EnumMap<AxisType, V>(AxisType.class);
-				map.put(AxisType.X, xValue);
-				map.put(AxisType.Y, yValue);
+				this.xValueAccessor = new ValueAccessor(xValue);
+				this.yValueAccessor = new ValueAccessor(yValue);
 			}
 
-			public V get(AxisType key) {
-				return map.get(key);
+			@Override
+			protected ValueAccessor getAccessor(AxisType key) {
+				switch (key) {
+				case X:
+					return xValueAccessor;
+				case Y:
+					return yValueAccessor;
+				}
+				return null;
 			}
 		}
 
@@ -132,17 +130,24 @@ public class AroundWorker {
 			OUT work(Around around, IN in, AxisType axisType);
 		}
 
-		public static class OffsetTypeMap<V> {
-			private final EnumMap<OffsetType, V> map;
+		public static class OffsetTypeMap<V> extends ValueAccessorMap<OffsetType, V> {
+			private ValueAccessor prevValueAccessor;
+			private ValueAccessor nextValueAccessor;
 
 			public OffsetTypeMap(V prevValue, V nextValue) {
-				map = new EnumMap<OffsetType, V>(OffsetType.class);
-				map.put(OffsetType.PREV, prevValue);
-				map.put(OffsetType.NEXT, nextValue);
+				this.prevValueAccessor = new ValueAccessor(prevValue);
+				this.nextValueAccessor = new ValueAccessor(nextValue);
 			}
 
-			public V get(OffsetType key) {
-				return map.get(key);
+			@Override
+			protected ValueAccessor getAccessor(OffsetType key) {
+				switch (key) {
+				case NEGATIVE:
+					return prevValueAccessor;
+				case POSITIVE:
+					return nextValueAccessor;
+				}
+				return null;
 			}
 		}
 
@@ -159,11 +164,11 @@ public class AroundWorker {
 		}
 
 		enum OffsetType {
-			NEXT, PREV,
+			POSITIVE, NEGATIVE,
 		}
 
 		public static <V> void foreach(DirectionalWorker<Around, V> worker, V dto) {
-			AroundWorker.foreach(worker, dto, values());
+			EnumSupport.foreach(worker, dto, values());
 		}
 
 		public static <V, AT, OT> V forEachTypeWork(V dto, AxisTypeWorker<AT, Void> axisTypeWorker, OffsetTypeWorker<OT, AT> offsetTypeWorker,
@@ -186,10 +191,10 @@ public class AroundWorker {
 		private final AxisType axisType;
 		private final OffsetType offsetType;
 
-		private static final DirectionableChainMap<Around> MAP;
+		private static final EnumChainMap<Around> MAP;
 
 		static {
-			DirectionableChainMap<Around> map = new DirectionableChainMap<AroundWorker.Around>(Around.values());
+			EnumChainMap<Around> map = new EnumChainMap<AroundWorker.Around>(Around.values());
 			MAP = map;
 		}
 
@@ -234,12 +239,12 @@ public class AroundWorker {
 	}
 
 	enum Diagonal implements AroundsDirectionable<Diagonal> {
-		FORWARDRIGHT(Offset.FORWARDRIGHT), FORWARDLEFT(Offset.FORWARDLEFT), BACKLEFT(Offset.BACKLEFT), BACKRIGHT(Offset.BACKRIGHT), //
+		FORWARDRIGHT(Offset.FORWARDRIGHT), BACKRIGHT(Offset.BACKRIGHT), BACKLEFT(Offset.BACKLEFT), FORWARDLEFT(Offset.FORWARDLEFT), //
 		;
 		private final Offset offset;
-		private static final DirectionableChainMap<Diagonal> MAP;
+		private static final EnumChainMap<Diagonal> MAP;
 		static {
-			DirectionableChainMap<Diagonal> map = new DirectionableChainMap<AroundWorker.Diagonal>(Diagonal.values());
+			EnumChainMap<Diagonal> map = new EnumChainMap<AroundWorker.Diagonal>(Diagonal.values());
 			MAP = map;
 		}
 
@@ -284,9 +289,9 @@ public class AroundWorker {
 		FORWARDLEFT(Offset.FORWARDLEFT), //
 		;
 		private final Offset offset;
-		private static final DirectionableChainMap<Direction> MAP;
+		private static final EnumChainMap<Direction> MAP;
 		static {
-			DirectionableChainMap<Direction> map = new DirectionableChainMap<AroundWorker.Direction>(Direction.values());
+			EnumChainMap<Direction> map = new EnumChainMap<AroundWorker.Direction>(Direction.values());
 			MAP = map;
 		}
 
@@ -321,75 +326,14 @@ public class AroundWorker {
 
 	}
 
-	private static class DirectionableChainMap<T extends Enum<T> & Directionable<T>> {
-		private class DirectionableChain {
-			T prev;
-			T next;
-			T reverse;
-
-			private DirectionableChain(T prev, T next, T reverse) {
-				this.prev = prev;
-				this.next = next;
-				this.reverse = reverse;
-			}
-
-		}
-
-		private final Map<T, DirectionableChain> map;
-
-		private DirectionableChainMap(T[] ts) {
-			Map<T, DirectionableChain> map = new HashMap<T, DirectionableChain>();
-			int reverseAmount = ts.length / 2;
-			for (int i = 0; i < ts.length; i++) {
-				T t = ts[i];
-
-				int nextIdx = i + 1;
-				nextIdx = nextIdx < ts.length ? nextIdx : nextIdx - ts.length;
-
-				int prevIdx = i - 1;
-				prevIdx = prevIdx >= 0 ? prevIdx : prevIdx + ts.length;
-
-				int reverseIdx = i + reverseAmount;
-				reverseIdx = reverseIdx < ts.length ? reverseIdx : reverseIdx - ts.length;
-
-				map.put(t, new DirectionableChain(ts[prevIdx], ts[nextIdx], ts[reverseIdx]));
-			}
-			this.map = map;
-		}
-
-		public T next(T dir) {
-			return map.get(dir).next;
-		}
-
-		public T prev(T dir) {
-			return map.get(dir).prev;
-		}
-
-		public T reverse(T dir) {
-			return map.get(dir).reverse;
-		}
-	}
-
-	public static <V, T extends Enum<T> & Directionable<T>> void foreach(DirectionalWorker<T, V> worker, V dto, T[] ts) {
-		for (T t : ts) {
-			worker.work(t, t.getOffset(), dto);
-		}
-	}
-
-	public static <T extends Enum<T> & Directionable<T>, V> EnumMap<T, V> mapToEnum(Class<T> type, EnumMappingWorker<T, V> worker, T[] ts) {
-		EnumMap<T, V> map = new EnumMap<T, V>(type);
-		foreach(worker, map, ts);
-		return map;
-	}
-
 	public static <V, T extends Enum<T> & Directionable<T>> void workTwoSidesDirection(T dir, TwoSideWorker<T, V> worker, V dto) {
 		{
 			T d = dir.prev();
-			worker.workPrev(d, d.getOffset(), dto);
+			worker.workPrev(d, dto);
 		}
 		{
 			T d = dir.next();
-			worker.workNext(d, d.getOffset(), dto);
+			worker.workNext(d, dto);
 		}
 	}
 }
