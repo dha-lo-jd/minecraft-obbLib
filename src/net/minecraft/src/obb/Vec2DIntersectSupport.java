@@ -36,7 +36,7 @@ public class Vec2DIntersectSupport {
 			return null;
 		}
 
-		Point tempPointBA = new Point(aFromY - aFromX, bFromY - aFromY);
+		Point tempPointBA = new Point(bFromX - aFromX, bFromY - aFromY);
 
 		double dR = ((bToY - bFromY) * tempPointBA.x - (bToX - bFromX) * tempPointBA.y) / denomin;
 		double dS = ((aToY - aFromY) * tempPointBA.x - (aToX - aFromX) * tempPointBA.y) / denomin;
